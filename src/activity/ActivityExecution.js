@@ -27,13 +27,6 @@ export default function ActivityExecution(activity, context) {
 
   return executionApi;
 
-  function getPostponed() {
-    let apis = postponed.map((msg) => getApi(msg));
-    if (!isSubProcess || !source) return apis;
-    apis = apis.concat(source.getPostponed());
-    return apis;
-  }
-
   function execute(executeMessage) {
     if (!executeMessage) throw new Error('Execution requires message');
     if (!executeMessage.content || !executeMessage.content.executionId) throw new Error('Execution requires execution id');
@@ -112,6 +105,7 @@ export default function ActivityExecution(activity, context) {
     const messageType = message.properties.type;
 
     switch (messageType) {
+      case 'cancel':
       case 'discard':
         executeQ.queueMessage({routingKey: 'execute.discard'}, cloneContent(initMessage.content));
         break;
@@ -146,8 +140,8 @@ export default function ActivityExecution(activity, context) {
         if (!postponed.length) return broker.publish('execution', 'execute.start', cloneContent(initMessage.content));
         break;
       }
-      case 'execute.error':
       case 'execute.discard':
+      case 'execute.error':
         executionDiscard();
         break;
       case 'execute.cancel':
@@ -231,7 +225,7 @@ export default function ActivityExecution(activity, context) {
       publishExecutionCompleted('completed', {...postponedMsg.content, ...message.content});
     }
 
-    function executionDiscard() {
+    function executionDiscard(messageType = 'discard') {
       const postponedMsg = ackPostponed(message);
       if (!isRootScope && !postponedMsg) return;
 
@@ -251,7 +245,7 @@ export default function ActivityExecution(activity, context) {
       postponed.splice(0);
       subApis.forEach((api) => api.discard());
 
-      publishExecutionCompleted(error ? 'error' : 'discard', {...content});
+      publishExecutionCompleted(error ? 'error' : messageType, {...content});
     }
 
     function publishExecutionCompleted(completionType, completeContent) {
@@ -272,6 +266,13 @@ export default function ActivityExecution(activity, context) {
     const [msg] = postponed.splice(idx, 1);
     msg.ack();
     return msg;
+  }
+
+  function getPostponed() {
+    let apis = postponed.map((msg) => getApi(msg));
+    if (!isSubProcess || !source) return apis;
+    apis = apis.concat(source.getPostponed());
+    return apis;
   }
 
   function getApi(apiMessage) {

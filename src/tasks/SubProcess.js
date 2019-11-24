@@ -63,6 +63,7 @@ export function SubProcessBehaviour(activity, context) {
 
     function onApiRootMessage(routingKey, message) {
       const messageType = message.properties.type;
+
       switch (messageType) {
         case 'stop':
           broker.cancel(`_api-${rootExecutionId}`);

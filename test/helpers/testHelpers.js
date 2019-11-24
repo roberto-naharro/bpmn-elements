@@ -65,7 +65,7 @@ export function Logger(scope) {
   };
 }
 
-function emptyContext(override, options) {
+export function emptyContext(override, options) {
   return Context({
     getActivities() {},
     getAssociations() {},

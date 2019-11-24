@@ -1504,7 +1504,7 @@ describe('ActivityExecution', () => {
       }
     });
 
-    it('last iteration canceled completes execution', () => {
+    it('last iteration discarded completes execution', () => {
       const task = createActivity(Behaviour);
       const execution = ActivityExecution(task);
 
@@ -1922,6 +1922,15 @@ function createActivity(Behaviour) {
     Logger,
   });
 
+  const ctx = testHelpers.emptyContext({
+    environment,
+    getInboundSequenceFlows() {
+      return [
+        {id: 'flow', sourceId: 'task', targetId: 'end', parent: {id: 'process1'}, Behaviour: SequenceFlow}
+      ];
+    },
+  });
+
   return Activity(Behaviour || ActivityBehaviour, {
     id: 'activity',
     type: 'task',
@@ -1929,17 +1938,7 @@ function createActivity(Behaviour) {
       id: 'process1',
       type: 'process'
     }
-  }, {
-    environment,
-    getInboundSequenceFlows() {
-      return [SequenceFlow({id: 'flow', sourceId: 'task', targetId: 'end', parent: {id: 'process1'}}, {environment})];
-    },
-    getOutboundSequenceFlows() {
-      return [];
-    },
-    loadExtensions() {},
-    getInboundAssociations() {},
-  });
+  }, ctx);
 
   function ActivityBehaviour({broker}) {
     return {

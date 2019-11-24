@@ -52,8 +52,10 @@ function Api(pfx, broker, sourceMessage, environment) {
       sendApiMessage('cancel');
     },
 
-    discard() {
-      sendApiMessage('discard');
+    discard(message) {
+      sendApiMessage('discard', {
+        message
+      });
     },
 
     signal(message, options) {

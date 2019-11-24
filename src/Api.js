@@ -48,8 +48,8 @@ function Api(pfx, broker, sourceMessage, environment) {
     cancel() {
       sendApiMessage('cancel');
     },
-    discard() {
-      sendApiMessage('discard');
+    discard(message) {
+      sendApiMessage('discard', {message});
     },
     signal(message, options) {
       sendApiMessage('signal', {message}, options);

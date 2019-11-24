@@ -346,7 +346,7 @@ function ProcessExecution(parentActivity, context) {
         activity.run(content.message);
       }
     });
-    getApi().sendApiMessage(eventType, content, {
+    getApi().sendApiMessage(eventType, (0, _messageHelper.cloneContent)(content), {
       delegate: true
     });
     return delegate;

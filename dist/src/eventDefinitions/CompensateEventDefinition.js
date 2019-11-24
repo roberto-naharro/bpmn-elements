@@ -43,6 +43,14 @@ function CompensationEventDefinition(activity, eventDefinition, context) {
       parent
     } = messageContent;
     const parentExecutionId = parent && parent.executionId;
+    broker.assertExchange('compensate', 'topic');
+    const compensateQ = broker.assertQueue('compensate-q', {
+      durable: true,
+      autoDelete: false
+    });
+    compensateQ.queueMessage({
+      routingKey: 'compensate.init'
+    }, (0, _messageHelper.cloneContent)(messageContent));
     broker.consume(compensationQueueName, onCompensateApiMessage, {
       noAck: true,
       consumerTag: `_oncompensate-${executionId}`
@@ -54,11 +62,6 @@ function CompensationEventDefinition(activity, eventDefinition, context) {
     });
     if (completed) return stop();
     debug(`<${executionId} (${id})> expect compensate`);
-    broker.assertExchange('compensate', 'topic');
-    const compensateQ = broker.assertQueue('compensate-q', {
-      durable: true,
-      autoDelete: false
-    });
     broker.subscribeTmp('compensate', 'execute.#', onCollect, {
       noAck: true,
       consumerTag: '_oncollect-messages'
@@ -97,7 +100,6 @@ function CompensationEventDefinition(activity, eventDefinition, context) {
       });
       compensateQ.on('depleted', onDepleted);
       compensateQ.consume(onCollected, {
-        noAck: true,
         consumerTag: '_convey-messages'
       });
       associations.forEach(association => {
@@ -114,9 +116,11 @@ function CompensationEventDefinition(activity, eventDefinition, context) {
     }
 
     function onCollected(routingKey, message) {
+      if (routingKey === 'compensate.init') return message.ack();
       associations.forEach(association => {
         association.take((0, _messageHelper.cloneMessage)(message));
       });
+      message.ack();
     }
 
     function onApiMessage(routingKey, message) {
@@ -171,8 +175,7 @@ function CompensationEventDefinition(activity, eventDefinition, context) {
       type: 'compensate',
       delegate: true
     });
-    return broker.publish('execution', 'execute.completed', { ...messageContent
-    });
+    return broker.publish('execution', 'execute.completed', messageContent);
   }
 
   function setupCatch() {

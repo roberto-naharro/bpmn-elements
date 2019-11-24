@@ -30,10 +30,10 @@ function Activity(Behaviour, activityDef, context) {
     behaviour = {},
     isParallelGateway,
     isSubProcess,
+    isTransaction,
     triggeredByEvent,
     isThrowing
   } = activityDef;
-  const isForCompensation = behaviour.isForCompensation;
   const parent = (0, _messageHelper.cloneParent)(originalParent);
   const {
     environment,
@@ -48,7 +48,8 @@ function Activity(Behaviour, activityDef, context) {
   const {
     attachedTo: attachedToRef,
     ioSpecification: ioSpecificationDef,
-    eventDefinitions
+    eventDefinitions,
+    isForCompensation
   } = behaviour;
   let attachedToActivity, attachedTo;
 
@@ -83,10 +84,11 @@ function Activity(Behaviour, activityDef, context) {
     type,
     name,
     isEnd,
-    isStart,
-    isSubProcess,
-    isThrowing,
     isForCompensation,
+    isSubProcess,
+    isStart,
+    isThrowing,
+    isTransaction,
     triggeredByEvent,
     parent: (0, _messageHelper.cloneParent)(parent),
     behaviour: { ...behaviour,
@@ -228,7 +230,8 @@ function Activity(Behaviour, activityDef, context) {
       isSubProcess,
       isMultiInstance,
       isForCompensation,
-      attachedTo
+      attachedTo,
+      isTransaction
     };
 
     for (const flag in flags) {
@@ -751,6 +754,12 @@ function Activity(Behaviour, activityDef, context) {
     const messageType = message.properties.type;
 
     switch (messageType) {
+      case 'cancel':
+        {
+          publishEvent('cancel');
+          break;
+        }
+
       case 'discard':
         {
           discardRun(message);

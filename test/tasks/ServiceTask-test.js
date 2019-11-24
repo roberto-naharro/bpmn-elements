@@ -252,18 +252,18 @@ describe('ServiceTask', () => {
         callback(new Error('Failed'));
       });
 
-      const boundEvent1 = context.getActivityById('errorEvent');
-      const boundEvent2 = context.getActivityById('timerEvent');
+      const boundError = context.getActivityById('errorEvent');
+      const boundTimer = context.getActivityById('timerEvent');
       const task = context.getActivityById('serviceTask');
       const errored = task.waitFor('error');
-      boundEvent1.activate();
-      boundEvent2.activate();
+      boundError.activate();
+      boundTimer.activate();
       task.activate();
       task.inbound[0].take();
 
       await errored;
 
-      expect(boundEvent2.counters).to.have.property('discarded', 1);
+      expect(boundTimer.counters).to.have.property('discarded', 1);
     });
 
     it('caught error still completes activity', async () => {

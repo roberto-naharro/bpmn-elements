@@ -290,7 +290,7 @@ export default function ProcessExecution(parentActivity, context) {
       }
     });
 
-    getApi().sendApiMessage(eventType, content, {delegate: true});
+    getApi().sendApiMessage(eventType, cloneContent(content), {delegate: true});
 
     return delegate;
   }

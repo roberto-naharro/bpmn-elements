@@ -72,7 +72,7 @@ Feature('Compensation', () => {
     });
 
     let end;
-    When('definition is ran with the decision to discard', () => {
+    When('definition is ran', () => {
       end = definition.waitFor('end');
       definition.run();
     });
@@ -328,7 +328,7 @@ Feature('Compensation', () => {
 
     And('service completes with error', () => {
       const [, callback] = execService.pop();
-      callback(new Error('indeterministic'));
+      callback(new Error('non-deterministic'));
     });
 
     Then('compensation service is waiting for callback again', () => {
@@ -521,7 +521,7 @@ Feature('Compensation', () => {
 
     And('service completes with error', () => {
       const [, callback] = execService.pop();
-      callback(new Error('indeterministic'));
+      callback(new Error('non-deterministic'));
     });
 
     Then('compensation service is waiting for callback again', () => {
@@ -559,7 +559,7 @@ Feature('Compensation', () => {
 
     And('service completes with error', () => {
       const [, callback] = execService.pop();
-      callback(new Error('indeterministic'));
+      callback(new Error('non-deterministic'));
     });
 
     Then('compensation service is waiting for callback again', () => {
@@ -613,6 +613,137 @@ Feature('Compensation', () => {
     And('compensation service is taken once again', () => {
       const task = recovered.getActivityById('undoService');
       expect(task.counters).to.have.property('taken', 6);
+    });
+  });
+
+  Scenario('A sub process compensate event', () => {
+    let context, definition;
+    const execService = [];
+    const undoService = [];
+    Given('a sub process with compensated service task', async () => {
+      const source = `
+      <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL" id="Def" targetNamespace="http://bpmn.io/schema/bpmn">
+        <process id="theProcess" isExecutable="true">
+          <startEvent id="start" />
+          <sequenceFlow id="flow1" sourceRef="start" targetRef="subp" />
+          <subProcess id="subp">
+            <serviceTask id="service" implementation="\${environment.services.exec}" />
+            <boundaryEvent id="compensation" attachedToRef="service">
+              <compensateEventDefinition />
+            </boundaryEvent>
+            <boundaryEvent id="onError" attachedToRef="service">
+              <errorEventDefinition />
+            </boundaryEvent>
+            <serviceTask id="undoService" isForCompensation="true" implementation="\${environment.services.compensate}" />
+            <sequenceFlow id="flow2" sourceRef="service" targetRef="end1" />
+            <sequenceFlow id="flow3" sourceRef="onError" targetRef="end2" />
+            <endEvent id="end1" />
+            <endEvent id="end2">
+              <compensateEventDefinition />
+            </endEvent>
+            <association id="association_0" associationDirection="One" sourceRef="compensation" targetRef="undoService" />
+          </subProcess>
+          <sequenceFlow id="flow2" sourceRef="subp" targetRef="end" />
+          <endEvent id="end" />
+        </process>
+      </definitions>`;
+      context = await testHelpers.context(source);
+
+      definition = Definition(context, {
+        services: {
+          exec(...args) {
+            execService.push(args);
+          },
+          compensate(...args) {
+            undoService.push(args);
+          }
+        }
+      });
+    });
+
+    let end;
+    When('definition is ran', () => {
+      end = definition.waitFor('end');
+      definition.run();
+    });
+
+    let subProcess;
+    Then('service waits for callback', () => {
+      expect(execService).to.have.length(1);
+      [subProcess] = definition.getPostponed();
+      expect(subProcess).to.have.property('id', 'subp');
+    });
+
+    And('compensation service is not started', () => {
+      expect(undoService).to.have.length(0);
+    });
+
+    When('service completes with error', () => {
+      const [, callback] = execService.pop();
+      callback(new Error('volatile'));
+    });
+
+    Then('compensation service is waiting for callback', () => {
+      expect(undoService).to.have.length(1);
+    });
+
+    let completeArgs, undoCallback;
+    And('it has the execute complete data from the service task', () => {
+      [completeArgs, undoCallback] = undoService.pop();
+
+      expect(completeArgs).to.have.property('content').with.property('message').with.property('fields').with.property('routingKey', 'execute.error');
+      expect(completeArgs.content.message).to.have.property('content');
+      expect(completeArgs.content.message.content).to.have.property('id', 'service');
+      expect(completeArgs.content.message.content).to.have.property('error').with.property('message', 'volatile');
+    });
+
+    When('compensation service completes', () => {
+      undoCallback(null, true);
+    });
+
+    Then('definition completes', () => {
+      return end;
+    });
+
+    When('definition is ran again', () => {
+      end = definition.waitFor('end');
+      definition.run();
+    });
+
+    And('service completes', () => {
+      const [, callback] = execService.pop();
+      callback(null, {data: 1});
+    });
+
+    Then('compensation service is NOT waiting for callback', () => {
+      expect(undoService).to.have.length(0);
+    });
+
+    And('definition completes', () => {
+      return end;
+    });
+
+    When('definition is ran again', () => {
+      end = definition.waitFor('end');
+      definition.run();
+    });
+
+    And('service completes with error', () => {
+      const [, callback] = execService.pop();
+      callback(new Error('non-deterministic'));
+    });
+
+    Then('compensation service is waiting for callback again', () => {
+      expect(undoService).to.have.length(1);
+    });
+
+    When('compensation service completes', () => {
+      const [, callback] = undoService.pop();
+      callback(null, true);
+    });
+
+    And('definition completes', () => {
+      return end;
     });
   });
 });

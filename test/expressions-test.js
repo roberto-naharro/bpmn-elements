@@ -175,6 +175,32 @@ describe('Expressions', () => {
       })).to.equal(201);
     });
 
+    it('expression with single quoted argument returns value', () => {
+      expect(expressions.resolveExpression('${services.append(variables.input,\'b\')}', {
+        variables: {
+          input: 'a',
+        },
+        services: {
+          append(input, str) {
+            return input + str;
+          },
+        },
+      })).to.equal('ab');
+    });
+
+    it('expression with double quoted argument returns value', () => {
+      expect(expressions.resolveExpression('${services.append(variables.input,"b")}', {
+        variables: {
+          input: 'a',
+        },
+        services: {
+          append(input, str) {
+            return input + str;
+          },
+        },
+      })).to.equal('ab');
+    });
+
     it('expression ${true} return true', () => {
       expect(expressions.resolveExpression('${true}')).to.be.true;
     });

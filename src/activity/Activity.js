@@ -7,8 +7,7 @@ import {cloneContent, cloneParent, cloneMessage} from '../messageHelper';
 import {makeErrorFromMessage} from '../error/Errors';
 
 export default function Activity(Behaviour, activityDef, context) {
-  const {id, type = 'activity', name, parent: originalParent = {}, behaviour = {}, isParallelGateway, isSubProcess, triggeredByEvent, isThrowing} = activityDef;
-  const isForCompensation = behaviour.isForCompensation;
+  const {id, type = 'activity', name, parent: originalParent = {}, behaviour = {}, isParallelGateway, isSubProcess, isTransaction, triggeredByEvent, isThrowing} = activityDef;
 
   const parent = cloneParent(originalParent);
   const {environment, getInboundSequenceFlows, getOutboundSequenceFlows, getInboundAssociations} = context;
@@ -16,7 +15,7 @@ export default function Activity(Behaviour, activityDef, context) {
   const logger = environment.Logger(type.toLowerCase());
   const {step} = environment.settings;
 
-  const {attachedTo: attachedToRef, ioSpecification: ioSpecificationDef, eventDefinitions} = behaviour;
+  const {attachedTo: attachedToRef, ioSpecification: ioSpecificationDef, eventDefinitions, isForCompensation} = behaviour;
   let attachedToActivity, attachedTo;
 
   if (attachedToRef) {
@@ -48,10 +47,11 @@ export default function Activity(Behaviour, activityDef, context) {
     type,
     name,
     isEnd,
-    isStart,
-    isSubProcess,
-    isThrowing,
     isForCompensation,
+    isSubProcess,
+    isStart,
+    isThrowing,
+    isTransaction,
     triggeredByEvent,
     parent: cloneParent(parent),
     behaviour: {...behaviour, eventDefinitions},
@@ -172,7 +172,15 @@ export default function Activity(Behaviour, activityDef, context) {
       parent: cloneParent(parent),
     };
 
-    const flags = {isEnd, isStart, isSubProcess, isMultiInstance, isForCompensation, attachedTo};
+    const flags = {
+      isEnd,
+      isStart,
+      isSubProcess,
+      isMultiInstance,
+      isForCompensation,
+      attachedTo,
+      isTransaction,
+    };
     for (const flag in flags) {
       if (flags[flag]) result[flag] = flags[flag];
     }
@@ -639,6 +647,10 @@ export default function Activity(Behaviour, activityDef, context) {
   function onApiMessage(routingKey, message) {
     const messageType = message.properties.type;
     switch (messageType) {
+      case 'cancel': {
+        publishEvent('cancel');
+        break;
+      }
       case 'discard': {
         discardRun(message);
         break;

@@ -15,7 +15,8 @@ function ErrorEventDefinition(activity, eventDefinition) {
     broker,
     environment,
     getActivityById,
-    isThrowing
+    isThrowing,
+    attachedTo: isBoundaryEvent
   } = activity;
   const {
     type = 'ErrorEventDefinition',
@@ -62,15 +63,9 @@ function ErrorEventDefinition(activity, eventDefinition) {
       consumerTag: `_api-${executionId}`
     });
 
-    if (!environment.settings.strict) {
-      const expectRoutingKey = `execute.throw.${executionId}`;
-      broker.publish('execution', 'execute.expect', { ...(0, _messageHelper.cloneContent)(messageContent),
-        expectRoutingKey,
-        expect: { ...referenceMessage
-        }
-      });
-      broker.subscribeOnce('execution', expectRoutingKey, onErrorMessage, {
-        consumerTag: `_onerror-${executionId}`
+    if (isBoundaryEvent && !environment.settings.strict) {
+      broker.subscribeOnce('attached-event', 'activity.error', onErrorMessage, {
+        consumerTag: `_on-expected-error-${executionId}`
       });
     }
 
@@ -100,7 +95,6 @@ function ErrorEventDefinition(activity, eventDefinition) {
 
     function catchError(routingKey, message, error) {
       completed = true;
-      stop();
       debug(`<${executionId} (${id})> caught ${description}`);
       broker.publish('event', 'activity.catch', { ...messageContent,
         source: {
@@ -114,10 +108,27 @@ function ErrorEventDefinition(activity, eventDefinition) {
       }, {
         type: 'catch'
       });
-      return broker.publish('execution', 'execute.completed', { ...messageContent,
-        output: error,
-        cancelActivity: true,
-        state: 'catch'
+      if (message.content && message.content.isTransaction) return onCancelTransaction(routingKey, message, error);
+      return complete(error);
+    }
+
+    function onCancelTransaction(_, message, error) {
+      debug(`<${executionId} (${id})> cancel transaction sent from <${message.content.id}>`);
+      broker.assertExchange('cancel');
+      broker.publish('execution', 'execute.detach', (0, _messageHelper.cloneContent)({ ...messageContent,
+        bindExchange: 'cancel'
+      }));
+      broker.publish('event', 'activity.compensate', { ...(0, _messageHelper.cloneContent)(message.content),
+        state: 'throw'
+      }, {
+        type: 'compensate',
+        delegate: true
+      });
+      broker.subscribeTmp('cancel', 'execution.completed', () => {
+        return complete(error);
+      }, {
+        noAck: true,
+        consumerTag: `_oncancelend-${executionId}`
       });
     }
 
@@ -140,15 +151,29 @@ function ErrorEventDefinition(activity, eventDefinition) {
       }
     }
 
+    function complete(output) {
+      completed = true;
+      stop();
+      debug(`<${executionId} (${id})> completed`);
+      return broker.publish('execution', 'execute.completed', { ...messageContent,
+        output,
+        cancelActivity: true,
+        state: 'catch'
+      });
+    }
+
     function stop() {
       broker.cancel(`_onthrow-${executionId}`);
-      broker.cancel(`_onerror-${executionId}`);
       broker.cancel(`_api-${executionId}`);
+      broker.cancel(`_on-expected-error-${executionId}`);
       broker.purgeQueue(errorQueueName);
     }
   }
 
   function executeThrow(executeMessage) {
+    const {
+      isTransaction
+    } = environment.variables.content || {};
     const messageContent = (0, _messageHelper.cloneContent)(executeMessage.content);
     const {
       executionId,
@@ -161,6 +186,7 @@ function ErrorEventDefinition(activity, eventDefinition) {
     } = resolveMessage(executeMessage);
     debug(`<${executionId} (${id})> throw ${description}`);
     broker.publish('event', 'activity.throw', { ...(0, _messageHelper.cloneContent)(messageContent),
+      isTransaction,
       executionId: parentExecutionId,
       parent: (0, _messageHelper.shiftParent)(parent),
       message: { ...referenceMessage

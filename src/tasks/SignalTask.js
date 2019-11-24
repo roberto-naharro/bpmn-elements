@@ -35,17 +35,22 @@ export function SignalTaskBehaviour(activity) {
 
       switch (messageType) {
         case 'stop':
-          return broker.cancel(`_api-${executionId}`);
+          return stop();
         case 'signal':
-          broker.cancel(`_api-${executionId}`);
+          stop();
           return broker.publish('execution', 'execute.completed', cloneContent(content, {output: message.content.message, state: 'signal'}));
         case 'error':
-          broker.cancel(`_api-${executionId}`);
+          stop();
           return broker.publish('execution', 'execute.error', cloneContent(content, {error: new ActivityError(message.content.message, executeMessage, message.content)}, {mandatory: true}));
+        case 'cancel':
         case 'discard':
-          broker.cancel(`_api-${executionId}`);
-          return broker.publish('execution', 'execute.discard', cloneContent(content));
+          stop();
+          return broker.publish('execution', `execute.${messageType}`, cloneContent(content, {state: messageType}));
       }
+    }
+
+    function stop() {
+      return broker.cancel(`_api-${executionId}`);
     }
   }
 }

@@ -21,10 +21,13 @@ export default function CompensationEventDefinition(activity, eventDefinition, c
 
   function executeCatch(executeMessage) {
     let completed;
-
     const messageContent = cloneContent(executeMessage.content);
     const {executionId, parent} = messageContent;
     const parentExecutionId = parent && parent.executionId;
+
+    broker.assertExchange('compensate', 'topic');
+    const compensateQ = broker.assertQueue('compensate-q', {durable: true, autoDelete: false});
+    compensateQ.queueMessage({routingKey: 'compensate.init'}, cloneContent(messageContent));
 
     broker.consume(compensationQueueName, onCompensateApiMessage, {noAck: true, consumerTag: `_oncompensate-${executionId}`});
 
@@ -36,8 +39,7 @@ export default function CompensationEventDefinition(activity, eventDefinition, c
 
     debug(`<${executionId} (${id})> expect compensate`);
 
-    broker.assertExchange('compensate', 'topic');
-    const compensateQ = broker.assertQueue('compensate-q', {durable: true, autoDelete: false});
+
     broker.subscribeTmp('compensate', 'execute.#', onCollect, {noAck: true, consumerTag: '_oncollect-messages'});
 
     broker.publish('execution', 'execute.detach', cloneContent({
@@ -76,7 +78,7 @@ export default function CompensationEventDefinition(activity, eventDefinition, c
       }, {type: 'catch'});
 
       compensateQ.on('depleted', onDepleted);
-      compensateQ.consume(onCollected, {noAck: true, consumerTag: '_convey-messages'});
+      compensateQ.consume(onCollected, {consumerTag: '_convey-messages'});
 
       associations.forEach((association) => {
         association.complete(cloneMessage(message));
@@ -89,9 +91,11 @@ export default function CompensationEventDefinition(activity, eventDefinition, c
     }
 
     function onCollected(routingKey, message) {
+      if (routingKey === 'compensate.init') return message.ack();
       associations.forEach((association) => {
         association.take(cloneMessage(message));
       });
+      message.ack();
     }
 
     function onApiMessage(routingKey, message) {
@@ -138,7 +142,7 @@ export default function CompensationEventDefinition(activity, eventDefinition, c
       state: 'throw',
     }, {type: 'compensate', delegate: true});
 
-    return broker.publish('execution', 'execute.completed', {...messageContent});
+    return broker.publish('execution', 'execute.completed', messageContent);
   }
 
   function setupCatch() {

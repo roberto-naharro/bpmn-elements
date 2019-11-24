@@ -15,7 +15,8 @@ var _messageHelper = require("../messageHelper");
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
 function BoundaryEvent(activityDef, context) {
-  return (0, _Activity.default)(BoundaryEventBehaviour, activityDef, context);
+  return (0, _Activity.default)(BoundaryEventBehaviour, { ...activityDef
+  }, context);
 }
 
 function BoundaryEventBehaviour(activity) {
@@ -23,13 +24,15 @@ function BoundaryEventBehaviour(activity) {
     id,
     type = 'BoundaryEvent',
     broker,
-    environment,
     attachedTo,
     behaviour = {},
     eventDefinitions,
     logger
   } = activity;
-  const attachedToId = attachedTo.id;
+  const {
+    id: attachedToId
+  } = attachedTo;
+  broker.assertExchange('attached-event', 'topic');
   const cancelActivity = 'cancelActivity' in behaviour ? behaviour.cancelActivity : true;
   const eventDefinitionExecution = eventDefinitions && (0, _EventDefinitionExecution.default)(activity, eventDefinitions, 'execute.bound.completed');
   return {
@@ -48,31 +51,37 @@ function BoundaryEventBehaviour(activity) {
       inbound
     } = executeContent;
     let parentExecutionId, completeContent;
-    const errorConsumerTags = [];
+    const attachConsumerTags = [];
 
     if (isRootScope) {
       parentExecutionId = executionId;
-
-      if (eventDefinitionExecution && !environment.settings.strict) {
-        broker.subscribeTmp('execution', 'execute.expect', onExpectMessage, {
-          noAck: true,
-          consumerTag: '_expect-tag'
-        });
-      }
-
-      attachedTo.broker.subscribeTmp('event', 'activity.leave', onAttachedLeave, {
+      broker.subscribeTmp('attached-event', 'activity.leave', onAttachedLeave, {
         noAck: true,
         consumerTag: `_bound-listener-${parentExecutionId}`,
         priority: 300
       });
-      broker.subscribeOnce('execution', 'execute.detach', onDetachMessage, {
-        consumerTag: '_detach-tag'
+      attachedTo.broker.createShovel(`shovel-event-${id}`, {
+        exchange: 'event',
+        priority: 300
+      }, {
+        broker,
+        exchange: 'attached-event'
+      }, {
+        cloneMessage(msg) {
+          const shovelMsg = (0, _messageHelper.cloneMessage)(msg);
+          shovelMsg.properties.mandatory = undefined;
+          return shovelMsg;
+        }
+
       });
-      broker.subscribeOnce('api', `activity.#.${parentExecutionId}`, onApiMessage, {
-        consumerTag: `_api-${parentExecutionId}`
+      broker.subscribeOnce('execution', 'execute.detach', onDetach, {
+        consumerTag: '_detach-tag'
       });
       broker.subscribeOnce('execution', 'execute.bound.completed', onCompleted, {
         consumerTag: `_execution-completed-${parentExecutionId}`
+      });
+      broker.subscribeOnce('api', `activity.#.${parentExecutionId}`, onApiMessage, {
+        consumerTag: `_api-${parentExecutionId}`
       });
     }
 
@@ -88,8 +97,8 @@ function BoundaryEventBehaviour(activity) {
       const attachedToContent = inbound && inbound[0];
       logger.debug(`<${executionId} (id)> cancel ${attachedTo.status} activity <${attachedToContent.executionId} (${attachedToContent.id})>`);
       attachedTo.getApi({
-        content: attachedToContent
-      }).discard();
+        content: (0, _messageHelper.cloneContent)(attachedToContent)
+      }).discard((0, _messageHelper.cloneContent)(completeContent));
     }
 
     function onAttachedLeave(routingKey, message) {
@@ -99,45 +108,40 @@ function BoundaryEventBehaviour(activity) {
       return broker.publish('execution', 'execute.completed', completeContent);
     }
 
-    function onExpectMessage(_, message) {
-      const errorConsumerTag = `_bound-error-listener-${message.content.executionId}`;
-      errorConsumerTags.push(errorConsumerTag);
-      attachedTo.broker.subscribeTmp('event', 'activity.error', attachedErrorHandler(message.content.expectRoutingKey), {
-        noAck: true,
-        consumerTag: errorConsumerTag,
-        priority: 300
-      });
-    }
-
-    function attachedErrorHandler(routingKey) {
-      return function onAttachedError(_, message) {
-        if (message.content.id !== attachedToId) return;
-        broker.publish('execution', routingKey, (0, _messageHelper.cloneContent)(message.content));
-      };
-    }
-
-    function onDetachMessage(_, {
+    function onDetach(_, {
       content
     }) {
       logger.debug(`<${parentExecutionId} (${id})> detach from activity <${attachedTo.id}>`);
       stop(true);
-      const bindExchange = content.bindExchange;
-      attachedTo.broker.subscribeTmp('execution', '#', onAttachedExecuteMessage, {
-        noAck: true,
-        consumerTag: `_bound-listener-${parentExecutionId}`
-      });
       broker.subscribeOnce('execution', 'execute.bound.completed', onDetachedCompleted, {
         consumerTag: `_execution-completed-${parentExecutionId}`
       });
+      attachedTo.broker.createShovel(parentExecutionId, {
+        exchange: 'execution'
+      }, {
+        broker,
+        exchange: content.bindExchange
+      });
 
-      function onAttachedExecuteMessage(routingKey, message) {
-        broker.publish(bindExchange, routingKey, (0, _messageHelper.cloneContent)(message.content), message.properties);
+      function onDetachedCompleted(__, message) {
+        stop();
+        completeContent = (0, _messageHelper.cloneContent)(message.content);
+
+        if (!cancelActivity && !message.content.cancelActivity) {
+          return broker.publish('execution', 'execute.completed', completeContent);
+        }
+
+        const attachedToContent = inbound && inbound[0];
+
+        if (attachedToContent) {
+          logger.debug(`<${executionId} (${id})> cancel ${attachedTo.status} activity <${attachedToContent.executionId} (${attachedToContent.id})>`);
+          attachedTo.getApi({
+            content: (0, _messageHelper.cloneContent)(attachedToContent)
+          }).discard((0, _messageHelper.cloneContent)(completeContent));
+        }
+
+        return broker.publish('execution', 'execute.completed', completeContent);
       }
-    }
-
-    function onDetachedCompleted(_, message) {
-      stop();
-      return broker.publish('execution', 'execute.completed', (0, _messageHelper.cloneContent)(message.content));
     }
 
     function onApiMessage(_, message) {
@@ -154,14 +158,16 @@ function BoundaryEventBehaviour(activity) {
       }
     }
 
-    function stop(detach) {
+    function stop(detaching) {
       attachedTo.broker.cancel(`_bound-listener-${parentExecutionId}`);
-      attachedTo.broker.cancel(`_bound-error-listener-${parentExecutionId}`);
-      errorConsumerTags.forEach(tag => attachedTo.broker.cancel(tag));
+      broker.cancel(`_bound-listener-${parentExecutionId}`);
+      attachConsumerTags.splice(0).forEach(tag => attachedTo.broker.cancel(tag));
       broker.cancel('_expect-tag');
       broker.cancel('_detach-tag');
       broker.cancel(`_execution-completed-${parentExecutionId}`);
-      if (detach) return;
+      if (detaching) return;
+      attachedTo.broker.closeShovel(`shovel-event-${id}`);
+      attachedTo.broker.closeShovel(parentExecutionId);
       broker.cancel(`_api-${parentExecutionId}`);
     }
   }
