@@ -3,8 +3,18 @@ import Expressions from '../src/Expressions';
 const expressions = Expressions();
 
 describe('Expressions', () => {
-  describe('addressing variables', () => {
-    it('extracts variable value', () => {
+  describe('string literals', () => {
+    it('should return a string with the value', () => {
+      expect(expressions.resolveExpression('test')).to.equal('test');
+      expect(expressions.resolveExpression('test', {
+        variables: {
+          output: 1,
+        },
+      })).to.equal('test');
+    });
+  });
+  describe('accessing variables', () => {
+    it('should extracts variable value', () => {
       expect(expressions.resolveExpression('${variables.input}', {
         variables: {
           input: 1,
@@ -12,7 +22,7 @@ describe('Expressions', () => {
       })).to.equal(1);
     });
 
-    it('returns undefined if not found', () => {
+    it('should return undefined if not found', () => {
       expect(expressions.resolveExpression('${variables.input}', {
         variables: {
           output: 1,
@@ -20,7 +30,7 @@ describe('Expressions', () => {
       })).to.be.undefined;
     });
 
-    it('misspelled varailbes returns undefined', () => {
+    it('should return undefined for misspelled varailbes', () => {
       expect(expressions.resolveExpression('${varailbes.input}', {
         variables: {
           input: 1,
@@ -28,7 +38,7 @@ describe('Expressions', () => {
       })).to.be.undefined;
     });
 
-    it('addressing arrays returns value', () => {
+    it('should return arrays indexed value', () => {
       expect(expressions.resolveExpression('${variables.input[1]}', {
         variables: {
           input: [0, 1],
@@ -36,16 +46,24 @@ describe('Expressions', () => {
       })).to.equal(1);
     });
 
-    it('addressing array without index returns undefined', () => {
-      expect(expressions.resolveExpression('${variables.input[]}', {
+    it('should return arrays negative indexed value', () => {
+      expect(expressions.resolveExpression('${variables.input[-2]}', {
+        variables: {
+          input: [0, 1, 2],
+        },
+      })).to.equal(1);
+    });
+
+    it('should throw an error accessing an array without index', () => {
+      expect(() => expressions.resolveExpression('${variables.input[]}', {
         variables: {
           input: [0, 1],
         },
-      })).to.be.undefined;
+      })).to.throw();
     });
 
-    it('addressing named property returns value', () => {
-      expect(expressions.resolveExpression('${variables.input[#complexName]}', {
+    it('should access string key index', () => {
+      expect(expressions.resolveExpression('${variables.input["#complexName"]}', {
         variables: {
           input: {
             '#complexName': 1,
@@ -54,8 +72,19 @@ describe('Expressions', () => {
       })).to.equal(1);
     });
 
-    it('deep property path returns value', () => {
-      expect(expressions.resolveExpression('${variables.input[#complexName].list[0]}', {
+    it('should access a variable index', () => {
+      expect(expressions.resolveExpression('${variables.input[keyVariable]}', {
+        variables: {
+          input: {
+            'testField': 1,
+          }
+        },
+        keyVariable: 'testField'
+      })).to.equal(1);
+    });
+
+    it('should access deep property paths', () => {
+      expect(expressions.resolveExpression('${variables.input["#complexName"].list[0]}', {
         variables: {
           input: {
             '#complexName': {
@@ -66,8 +95,16 @@ describe('Expressions', () => {
       })).to.equal(1);
     });
 
+    it('should return undefined when access to a field of an undefined object', () => {
+      expect(expressions.resolveExpression('${variables.input["#complexName"].list[0]}', {
+        variables: {
+          input: undefined,
+        },
+      })).to.be.undefined;
+    });
+
     describe('inline', () => {
-      it('variables in string', () => {
+      it('should parse variables to string', () => {
         expect(expressions.resolveExpression('PT${variables.input}S', {
           variables: {
             input: 0.1,
@@ -75,16 +112,26 @@ describe('Expressions', () => {
         })).to.equal('PT0.1S');
       });
 
-      it('expression in expression is not supported and returns weird value', () => {
-        expect(expressions.resolveExpression('PT${variables[${variables.property}]}S', {
+      it('should throw an error if there is an expression inside the expression', () => {
+        expect(() => expressions.resolveExpression('PT${variables[${variables.property}]}S', {
           variables: {
             input: 0.1,
             property: 'input',
           },
-        })).to.equal('PT]}S');
+        })).to.throw();
       });
 
-      it('combined', () => {
+      it('should evaluate if there is an expression inside the expression properly defined', () => {
+        expect(expressions.resolveExpression('${environment.variables[`${environment.commonVariablePrefix}${environment.current}`]}', {
+          environment: {
+            variables: { a1: 1, a2: 2, a3: 3 },
+            commonVariablePrefix: 'a',
+            current: 2,
+          },
+        })).to.equal(2);
+      });
+
+      it('should concatenate two variable scapes', () => {
         expect(expressions.resolveExpression('http://${variables.host}${variables.pathname}', {
           variables: {
             host: 'example.com',
@@ -93,13 +140,16 @@ describe('Expressions', () => {
         })).to.equal('http://example.com/api/v1');
       });
 
-      it('inserts nothing if variable is found but undefined', () => {
-        expect(expressions.resolveExpression('http://${variables.host}${variables.pathname}', {
-          variables: {
-            host: 'example.com',
-            pathname: undefined,
-          },
-        })).to.equal('http://example.com');
+      it('should support ternary and logic operations', () => {
+        expect(expressions.resolveExpression(
+          'http://${variables.host}${variables.pathname || ""}${variables.pathname2 ? variables.pathname2 : ""}',
+          {
+            variables: {
+              host: 'example.com',
+              pathname: undefined,
+              pathname2: null,
+            },
+          })).to.equal('http://example.com');
       });
     });
   });
@@ -115,8 +165,21 @@ describe('Expressions', () => {
       })()).to.equal('PT0.1S');
     });
 
-    it('service accessing variables returns value', () => {
+    it('should receive the context in empty functions', () => {
       expect(expressions.resolveExpression('${services.get()}', {
+        variables: {
+          timeout: 'PT0.1S',
+        },
+        services: {
+          get: (message) => {
+            return message.variables.timeout;
+          },
+        },
+      })).to.equal('PT0.1S');
+    });
+
+    it('service accessing variables returns value', () => {
+      expect(expressions.resolveExpression('${services.get({variables})}', {
         variables: {
           timeout: 'PT0.1S',
         },
@@ -138,6 +201,49 @@ describe('Expressions', () => {
       })).to.equal(200);
     });
 
+    it('expression with object argument returns value', () => {
+      expect(expressions.resolveExpression('${services.get({a: "test", b: "case"})}', {
+        services: {
+          get: (obj) => {
+            return Object.values(obj).join(' ');
+          },
+        },
+      })).to.equal('test case');
+    });
+
+    it('expression with object argument access to a variable and returns value', () => {
+      expect(expressions.resolveExpression('${services.get({a, b: "case"})}', {
+        a: 'test',
+        services: {
+          get: (obj) => {
+            return Object.values(obj).join(' ');
+          },
+        },
+      })).to.equal('test case');
+    });
+
+    it('expression with array argument returns value', () => {
+      expect(expressions.resolveExpression('${services.get([1, 2, 3])}', {
+        a: 'test',
+        services: {
+          get: (arr) => {
+            return arr;
+          },
+        },
+      })).to.deep.equal([1, 2, 3]);
+    });
+
+    it('expression with array argument with a variable inside returns value', () => {
+      expect(expressions.resolveExpression('${services.get([1, two, 3])}', {
+        two: 2,
+        services: {
+          get: (arr) => {
+            return arr;
+          },
+        },
+      })).to.deep.equal([1, 2, 3]);
+    });
+
     it('expression with empty arguments returns value', () => {
       expect(expressions.resolveExpression('${services.get()}', {
         services: {
@@ -148,7 +254,7 @@ describe('Expressions', () => {
       })).to.equal('200');
     });
 
-    it('expression with argument adressing variables returns value', () => {
+    it('expression with argument addressing variables returns value', () => {
       expect(expressions.resolveExpression('${services.get(variables.input[0])}', {
         variables: {
           input: [200],
@@ -161,7 +267,7 @@ describe('Expressions', () => {
       })).to.equal(200);
     });
 
-    it('expression with arguments adressing variables returns value', () => {
+    it('expression with arguments addressing variables returns value', () => {
       expect(expressions.resolveExpression('${services.get(variables.input[0],variables.add)}', {
         variables: {
           input: [200],
@@ -242,61 +348,25 @@ describe('Expressions', () => {
     it('expression ${0...} return number', () => {
       expect(expressions.resolveExpression('${0}')).to.equal(0);
       expect(expressions.resolveExpression('${1}')).to.equal(1);
-      expect(expressions.resolveExpression('${010}')).to.equal(10);
-      expect(expressions.resolveExpression('${010.1}')).to.equal(10.1);
-      expect(expressions.resolveExpression('${010,1}')).to.be.undefined;
-    });
-  });
-
-  describe('isExpression(text)', () => {
-    it('returns true if expression', () => {
-      expect(expressions.isExpression('${input}')).to.be.true;
-      expect(expressions.isExpression('${variables.input[#complexName].list[0]}')).to.be.true;
-      expect(expressions.isExpression('${services.get()}')).to.be.true;
+      // Octal number
+      expect(expressions.resolveExpression('${0o10}')).to.equal(8);
+      expect(expressions.resolveExpression('${10.1}')).to.equal(10.1);
     });
 
-    it('returns false if the string is not an explicit expression', () => {
-      expect(expressions.isExpression('return `${input}`;')).to.be.false;
-      expect(expressions.isExpression('`${input}`;')).to.be.false;
-      expect(expressions.isExpression('`${input}`')).to.be.false;
+    it('should work with lambda functions', () => {
+      expect(expressions.resolveExpression('${() => "value"}')()).to.equal('value');
+      expect(expressions.resolveExpression('${(test) => test}')(1)).to.equal(1);
     });
 
-    it('returns false if not expression', () => {
-      expect(expressions.isExpression('{input}')).to.be.false;
+    it('should throw an error if you do an unsafe operation', () => {
+      expect(() => expressions.resolveExpression('${() => {require("fs").deleteSync(".")}}')).to.throw();
     });
 
-    it('returns false if empty expression', () => {
-      expect(expressions.isExpression('${}')).to.be.false;
-    });
-
-    it('returns false if no argument is passed', () => {
-      expect(expressions.isExpression()).to.be.false;
-    });
-  });
-
-  describe('hasExpression(text)', () => {
-    it('returns true if expression', () => {
-      expect(expressions.hasExpression('${input}')).to.be.true;
-      expect(expressions.hasExpression('${variables.input[#complexName].list[0]}')).to.be.true;
-      expect(expressions.hasExpression('${services.get()}')).to.be.true;
-    });
-
-    it('returns true if the string is not an explicit expression', () => {
-      expect(expressions.hasExpression('return `${input}`;')).to.be.true;
-      expect(expressions.hasExpression('`${input}`;')).to.be.true;
-      expect(expressions.hasExpression('`${input}`')).to.be.true;
-    });
-
-    it('returns false if not expression', () => {
-      expect(expressions.hasExpression('{input}')).to.be.false;
-    });
-
-    it('returns false if empty expression', () => {
-      expect(expressions.hasExpression('${}')).to.be.false;
-    });
-
-    it('returns false if no argument is passed', () => {
-      expect(expressions.hasExpression()).to.be.false;
+    it('should support multiple lines inside the expression', () => {
+      expect(expressions.resolveExpression(`\${
+        (value) => {
+          return value;
+        }}`)(1)).to.equal(1);
     });
   });
 });

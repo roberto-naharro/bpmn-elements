@@ -409,12 +409,6 @@ describe('Environment', () => {
         resolveExpression(...args) {
           return args;
         },
-        isExpression() {
-          return true;
-        },
-        hasExpression() {
-          return true;
-        },
       };
       const environment = Environment({
         settings,
@@ -431,7 +425,6 @@ describe('Environment', () => {
       expect(environment.resolveExpression('${environment.settings.init}')).to.eql([
         '${environment.settings.init}',
         {environment},
-        undefined,
       ]);
     });
   });
